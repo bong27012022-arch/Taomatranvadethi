@@ -1,9 +1,9 @@
-
 import React, { useState } from 'react';
 import { generateExams } from './services/geminiService';
 import { ExamOutput, GenerationStatus, TabItem, InputData, DifficultyLevel } from './types';
 import { ExamDisplay } from './components/ExamDisplay';
 import { LoadingScreen } from './components/LoadingScreen';
+import mammoth from 'mammoth';
 
 const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
 const PDF_MIME = 'application/pdf';
@@ -67,17 +67,32 @@ const App: React.FC = () => {
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>, setInput: (data: InputData) => void) => {
     const file = e.target.files?.[0];
     if (file) {
-      const reader = new FileReader();
-
-      if (file.type === PDF_MIME || file.type === DOCX_MIME) {
+      if (file.type === DOCX_MIME) {
+        // Extract text from DOCX using mammoth (Gemini doesn't support DOCX inline)
+        const reader = new FileReader();
+        reader.onload = async (event) => {
+          try {
+            const arrayBuffer = event.target?.result as ArrayBuffer;
+            const result = await mammoth.extractRawText({ arrayBuffer });
+            setInput({ type: 'text', value: result.value, name: file.name });
+          } catch (err) {
+            console.error('Error extracting DOCX text:', err);
+            setErrorMsg('Không thể đọc file DOCX. Vui lòng thử lại hoặc paste nội dung trực tiếp.');
+          }
+        };
+        reader.readAsArrayBuffer(file);
+      } else if (file.type === PDF_MIME) {
+        // PDF is natively supported by Gemini as inline data
+        const reader = new FileReader();
         reader.onload = (event) => {
           const result = event.target?.result as string;
-          // result format is "data:<mime>;base64,....."
           const base64 = result.split(',')[1];
           setInput({ type: file.type as any, value: base64, name: file.name });
         };
         reader.readAsDataURL(file);
       } else {
+        // Plain text files
+        const reader = new FileReader();
         reader.onload = (event) => {
           const text = event.target?.result as string;
           setInput({ type: 'text', value: text, name: file.name });

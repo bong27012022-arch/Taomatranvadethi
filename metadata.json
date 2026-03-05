@@ -1,0 +1,5 @@
+{
+  "name": "TỪ MA TRẬN ĐẶC TẢ SANG ĐỀ THI VER4.0",
+  "description": "An AI-powered application to generate standardized Vietnamese High School Math exams (Kết nối tri thức) based on user-provided matrices and specifications.",
+  "requestFramePermissions": []
+}

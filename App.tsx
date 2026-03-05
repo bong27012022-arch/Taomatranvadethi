@@ -528,16 +528,16 @@ const App: React.FC = () => {
             <p className="font-medium text-slate-400">Mọi thông tin vui lòng liên hệ:</p>
             <div className="flex flex-col md:flex-row items-center justify-center gap-2 md:gap-6">
               <a
-                href="https://www.facebook.com/tranhoaithanhvicko/"
+                href="https://www.facebook.com/hothithuylinh/"
                 target="_blank"
                 rel="noreferrer"
                 className="hover:text-blue-400 transition-colors duration-200 flex items-center gap-2"
               >
-                <span className="font-bold">Facebook:</span> tranhoaithanhvicko
+                <span className="font-bold">Facebook:</span> Hồ Thị Thùy Linh
               </a>
               <div className="hidden md:block w-1.5 h-1.5 rounded-full bg-slate-600"></div>
               <span className="hover:text-emerald-400 transition-colors duration-200 cursor-default flex items-center gap-2">
-                <span className="font-bold">Zalo:</span> 0348296773
+                <span className="font-bold">Zalo:</span> 0972968098
               </span>
             </div>
           </div>

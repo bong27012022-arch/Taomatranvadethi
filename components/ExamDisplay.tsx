@@ -1,17 +1,19 @@
 import React, { useState } from 'react';
 import { TabItem } from '../types';
-import { 
-  Document, 
-  Packer, 
-  Paragraph, 
-  TextRun, 
-  Table, 
-  TableRow, 
-  TableCell, 
-  WidthType, 
-  BorderStyle, 
+import {
+  Document,
+  Packer,
+  Paragraph,
+  TextRun,
+  Math as DocxMath,
+  Table,
+  TableRow,
+  TableCell,
+  WidthType,
+  BorderStyle,
   AlignmentType
 } from "docx";
+import { latexToMath, parseLatex } from '../services/latexToDocxMath';
 
 interface ExamDisplayProps {
   data: TabItem[];
@@ -31,7 +33,7 @@ export const ExamDisplay: React.FC<ExamDisplayProps> = ({ data }) => {
 
   const handleDownload = () => {
     const element = document.createElement("a");
-    const file = new Blob([activeContent], {type: 'text/plain'});
+    const file = new Blob([activeContent], { type: 'text/plain' });
     element.href = URL.createObjectURL(file);
     element.download = `${activeTab}.txt`;
     document.body.appendChild(element);
@@ -43,7 +45,7 @@ export const ExamDisplay: React.FC<ExamDisplayProps> = ({ data }) => {
     // Basic parser for **bold** and *italic*
     // Split by delimiters, keeping delimiters
     const parts = text.split(/(\*\*.*?\*\*|\*.*?\*)/g);
-    
+
     return parts.map(part => {
       if (part.startsWith('**') && part.endsWith('**')) {
         return new TextRun({
@@ -69,6 +71,35 @@ export const ExamDisplay: React.FC<ExamDisplayProps> = ({ data }) => {
     });
   };
 
+  /**
+   * Parse a line of text that may contain inline LaTeX math ($...$).
+   * Returns an array of TextRun and DocxMath objects for use in a Paragraph.
+   */
+  const parseLineWithMath = (text: string): (TextRun | DocxMath)[] => {
+    // Split by inline math: $...$ (but not $$...$$)
+    // We use a regex that matches $...$ where the content is non-empty
+    const parts = text.split(/((?<!\$)\$(?!\$)(?:[^$\\]|\\.)+\$(?!\$))/g);
+    const result: (TextRun | DocxMath)[] = [];
+
+    for (const part of parts) {
+      if (!part) continue;
+      // Check if this part is an inline math expression
+      if (part.startsWith('$') && part.endsWith('$') && !part.startsWith('$$') && part.length > 2) {
+        const latex = part.slice(1, -1);
+        try {
+          result.push(latexToMath(latex));
+        } catch {
+          // Fallback: render as plain text if parsing fails
+          result.push(new TextRun({ text: part, font: "Times New Roman", size: 26 }));
+        }
+      } else {
+        // Regular text — apply bold/italic parsing
+        result.push(...parseRichText(part));
+      }
+    }
+    return result;
+  };
+
   const handleDownloadDoc = async () => {
     const lines = activeContent.split('\n');
     const children: (Paragraph | Table)[] = [];
@@ -85,13 +116,13 @@ export const ExamDisplay: React.FC<ExamDisplayProps> = ({ data }) => {
         let cleanLine = rowLine.trim();
         if (cleanLine.startsWith('|')) cleanLine = cleanLine.substring(1);
         if (cleanLine.endsWith('|')) cleanLine = cleanLine.substring(0, cleanLine.length - 1);
-        
+
         // Skip markdown separator row: ---|---
         if (/^[\s-]+\|[\s-]+/.test(cleanLine) || /^[\s-]+$/.test(cleanLine)) return;
 
         const cells = cleanLine.split('|').map(c => c.trim());
         const cellWidthPercent = Math.floor(100 / cells.length);
-        
+
         const tableCells = cells.map(cellText => {
           return new TableCell({
             children: [new Paragraph({
@@ -155,9 +186,45 @@ export const ExamDisplay: React.FC<ExamDisplayProps> = ({ data }) => {
       if (!line) {
         // Empty line -> Spacing
         children.push(new Paragraph({
-          text: "", 
+          text: "",
           spacing: { after: 120 } // 6pt spacing
         }));
+        continue;
+      }
+
+      // --- Display Math Detection: $$...$$ ---
+      if (line.startsWith('$$')) {
+        // Collect all lines until closing $$
+        let mathContent = line.substring(2);
+        if (mathContent.endsWith('$$')) {
+          // Single-line display math: $$...$$
+          mathContent = mathContent.substring(0, mathContent.length - 2);
+        } else {
+          // Multi-line display math
+          i++;
+          while (i < lines.length) {
+            const nextLine = lines[i].trim();
+            if (nextLine.endsWith('$$')) {
+              mathContent += ' ' + nextLine.substring(0, nextLine.length - 2);
+              break;
+            }
+            mathContent += ' ' + nextLine;
+            i++;
+          }
+        }
+        try {
+          children.push(new Paragraph({
+            children: [latexToMath(mathContent.trim())],
+            alignment: AlignmentType.CENTER,
+            spacing: { before: 120, after: 120 }
+          }));
+        } catch {
+          children.push(new Paragraph({
+            children: [new TextRun({ text: mathContent, font: "Times New Roman", size: 26 })],
+            alignment: AlignmentType.CENTER,
+            spacing: { before: 120, after: 120 }
+          }));
+        }
         continue;
       }
 
@@ -184,8 +251,8 @@ export const ExamDisplay: React.FC<ExamDisplayProps> = ({ data }) => {
 
       if (line.startsWith('---')) {
         // Horizontal rule -> Just nice spacing with border
-         children.push(new Paragraph({
-          text: "", 
+        children.push(new Paragraph({
+          text: "",
           border: { bottom: { style: BorderStyle.SINGLE, size: 6, space: 1, color: "auto" } },
           spacing: { before: 120, after: 120 }
         }));
@@ -193,13 +260,13 @@ export const ExamDisplay: React.FC<ExamDisplayProps> = ({ data }) => {
       }
 
       if (line.startsWith('>')) {
-         // Blockquote/Guide
-         const text = line.substring(1).trim();
-         children.push(new Paragraph({
-          children: parseRichText(text),
+        // Blockquote/Guide
+        const text = line.substring(1).trim();
+        children.push(new Paragraph({
+          children: parseLineWithMath(text),
           indent: { left: 720 }, // Indent 0.5 inch
           spacing: { after: 120 },
-          border: { left: { style: BorderStyle.SINGLE, size: 12, space: 4, color: "000000" }} // simulated quote bar
+          border: { left: { style: BorderStyle.SINGLE, size: 12, space: 4, color: "000000" } } // simulated quote bar
         }));
         continue;
       }
@@ -213,7 +280,7 @@ export const ExamDisplay: React.FC<ExamDisplayProps> = ({ data }) => {
           children: [
             new TextRun({ text: `Câu ${num}.`, bold: true, font: "Times New Roman", size: 26 }),
             new TextRun({ text: " ", font: "Times New Roman", size: 26 }),
-            ...parseRichText(rest)
+            ...parseLineWithMath(rest)
           ],
           spacing: { before: 240, after: 60 } // Space before question
         }));
@@ -229,7 +296,7 @@ export const ExamDisplay: React.FC<ExamDisplayProps> = ({ data }) => {
           children: [
             new TextRun({ text: `${label}.`, bold: true, font: "Times New Roman", size: 26 }),
             new TextRun({ text: " ", font: "Times New Roman", size: 26 }),
-            ...parseRichText(rest)
+            ...parseLineWithMath(rest)
           ],
           indent: { left: 720 }, // Indent 0.5 inch (~1.27cm)
           spacing: { after: 60 }
@@ -239,7 +306,7 @@ export const ExamDisplay: React.FC<ExamDisplayProps> = ({ data }) => {
 
       // --- Normal Text ---
       children.push(new Paragraph({
-        children: parseRichText(line),
+        children: parseLineWithMath(line),
         spacing: { after: 120 }
       }));
     }
@@ -250,45 +317,45 @@ export const ExamDisplay: React.FC<ExamDisplayProps> = ({ data }) => {
     const doc = new Document({
       styles: {
         default: {
-            document: {
-                run: {
-                    font: "Times New Roman",
-                    size: 26,
-                }
+          document: {
+            run: {
+              font: "Times New Roman",
+              size: 26,
             }
+          }
         }
       },
       sections: [{
         properties: {
-             page: {
-                margin: {
-                    top: 1440, // 1 inch = 1440 twips
-                    right: 1440,
-                    bottom: 1440,
-                    left: 1440,
-                },
+          page: {
+            margin: {
+              top: 1440, // 1 inch = 1440 twips
+              right: 1440,
+              bottom: 1440,
+              left: 1440,
             },
+          },
         },
         children: children
       }]
     });
 
     try {
-        // Generate Blob
-        const blob = await Packer.toBlob(doc);
-        
-        // Download
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        link.href = url;
-        link.download = `${activeTab}_${new Date().getTime()}.docx`;
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        URL.revokeObjectURL(url);
+      // Generate Blob
+      const blob = await Packer.toBlob(doc);
+
+      // Download
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `${activeTab}_${new Date().getTime()}.docx`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
     } catch (error) {
-        console.error("Error generating DOCX:", error);
-        alert("Có lỗi khi tạo file Word. Vui lòng thử lại.");
+      console.error("Error generating DOCX:", error);
+      alert("Có lỗi khi tạo file Word. Vui lòng thử lại.");
     }
   };
 
@@ -300,11 +367,10 @@ export const ExamDisplay: React.FC<ExamDisplayProps> = ({ data }) => {
           <button
             key={tab.id}
             onClick={() => setActiveTab(tab.id)}
-            className={`px-6 py-4 text-sm font-medium whitespace-nowrap transition-colors duration-200 focus:outline-none ${
-              activeTab === tab.id
+            className={`px-6 py-4 text-sm font-medium whitespace-nowrap transition-colors duration-200 focus:outline-none ${activeTab === tab.id
                 ? 'bg-white text-blue-600 border-t-2 border-t-blue-600 border-b-white -mb-px'
                 : 'text-slate-500 hover:text-slate-700 hover:bg-slate-100'
-            }`}
+              }`}
           >
             {tab.label}
           </button>
@@ -330,18 +396,18 @@ export const ExamDisplay: React.FC<ExamDisplayProps> = ({ data }) => {
           )}
         </button>
         <button
-           onClick={handleDownload}
-           className="flex items-center gap-2 px-3 py-1.5 text-xs font-medium text-slate-600 bg-slate-50 hover:bg-slate-100 rounded transition-colors"
+          onClick={handleDownload}
+          className="flex items-center gap-2 px-3 py-1.5 text-xs font-medium text-slate-600 bg-slate-50 hover:bg-slate-100 rounded transition-colors"
         >
-           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
-           Download .txt
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+          Download .txt
         </button>
         <button
-           onClick={handleDownloadDoc}
-           className="flex items-center gap-2 px-3 py-1.5 text-xs font-medium text-blue-700 bg-blue-100 hover:bg-blue-200 rounded transition-colors"
+          onClick={handleDownloadDoc}
+          className="flex items-center gap-2 px-3 py-1.5 text-xs font-medium text-blue-700 bg-blue-100 hover:bg-blue-200 rounded transition-colors"
         >
-           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" /></svg>
-           Download .docx
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" /></svg>
+          Download .docx
         </button>
       </div>
 
